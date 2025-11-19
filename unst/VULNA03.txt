@@ -1,0 +1,18 @@
+A03:2021 – Injection
+Esta vulnerabilidad puede permitir que algun atacante pueda enviar datos maliciosos mediante un input 
+dentro de la Api. Pudiendo si burlar o saltarse la seguridad de los datos y a su vez recolectando 
+dicha informacion de una manera muy facil y sencilla.
+
+Para esta solucion optamos por usar consultas parametrizadas permitiendo usar %s como marcador de posicion para los 
+valores y pasando los datos en una tupla separada al método cursor.execute(). Esto garantiza que la base de datos trate el input como datos, no como comandos SQL, neutralizando el ataque de inyeccion.
+
+El cambio se aplico en las funciones Registro, Login, Imagen y Descargar
+
+(Linea 251) (como un solo ejemplo. Se cambio en las demas funciones y es parecido el parche)
+			#PARCHE A03
+			sql_insert = 'INSERT INTO Imagen (id, name, ruta, id_Usuario) VALUES (NULL, %s, "img/", %s)'
+			cursor.execute(sql_insert, (request.json["name"], id_Usuario))
+			
+			#PARCHE A03
+			sql_select = 'SELECT MAX(id) AS idImagen FROM Imagen WHERE id_Usuario = %s'
+			cursor.execute(sql_select, (id_Usuario,))
