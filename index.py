@@ -7,7 +7,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from bottle import route, run, template, post, request, static_file, default_app
-import bcrypt # <--- Mantenido: Para hashing seguro de contraseñas
+import bcrypt 
 
 import ssl
 from wsgiref.simple_server import make_server, WSGIServer
@@ -70,7 +70,7 @@ def Registro():
 	if not R:
 		return {"R":-1}
 	
-	#PACHE A02
+	#PARCHE A02
 	pwsdcod = request.json["password"].encode('utf-8')
 	hshpwsd = bcrypt.hashpw(pwsdcod, bcrypt.gensalt()).decode('utf-8')
 
@@ -79,7 +79,11 @@ def Registro():
 	R = False
 	try:
 		with db.cursor() as cursor:
-			cursor.execute(f'insert into Usuario values(null,"{request.json["uname"]}","{request.json["email"]}", "{hshpwsd}")');
+			#PARCHE A03
+			sql = 'INSERT INTO Usuario VALUES (NULL, %s, %s, %s)'
+			data = (request.json["uname"], request.json["email"], hshpwsd)
+			cursor.execute(sql, data)
+			
 			R = cursor.lastrowid
 			db.commit()
 		db.close()
@@ -126,7 +130,9 @@ def Login():
 	usuario = False
 	try:
 		with db.cursor() as cursor:
-			cursor.execute(f'Select id, password from Usuario where uname ="{uname}"');
+			#PARCHE A03
+			sql = 'SELECT id, password FROM Usuario WHERE uname = %s'
+			cursor.execute(sql, (uname,))
 			usuario = cursor.fetchall()
 	except Exception as e: 
 		print(e)
@@ -144,6 +150,7 @@ def Login():
 
 	
 	try:
+		#PARCHE A02
 		if not bcrypt.checkpw(pswdcod, hsh_local):
 			db.close()
 			return {"R":-3} 
@@ -156,6 +163,8 @@ def Login():
 
 	T = getToken();
 	#file_put_contents('/tmp/log','insert into AccesoToken values('.R[0].',"'.T.'",now())');
+	# Ojo: la siguiente sección no es vulnerable a SQLi, pero sí al Path Traversal, 
+	# lo abordaremos más adelante si lo pides.
 	with open("/tmp/log","a") as log:
 		log.write(f'Delete from AccesoToken where id_Usuario = "{R_id}"\n')
 		log.write(f'insert into AccesoToken values({R_id},"{T}",now())\n')
@@ -163,8 +172,9 @@ def Login():
 	
 	try:
 		with db.cursor() as cursor:
-			cursor.execute(f'Delete from AccesoToken where id_Usuario = "{R_id}"');
-			cursor.execute(f'insert into AccesoToken values({R_id},"{T}",now())');
+			#PARCHE A03
+			cursor.execute('DELETE FROM AccesoToken WHERE id_Usuario = %s', (R_id,));
+			cursor.execute('INSERT INTO AccesoToken VALUES (%s, %s, NOW())', (R_id, T));
 			db.commit()
 			db.close()
 			return {"R":0,"D":T}
@@ -216,7 +226,8 @@ def Imagen():
 	R = False
 	try:
 		with db.cursor() as cursor:
-			cursor.execute(f'select id_Usuario from AccesoToken where token = "{TKN}"');
+			#PARCHE A03
+			cursor.execute('SELECT id_Usuario FROM AccesoToken WHERE token = %s', (TKN,));
 			R = cursor.fetchall()
 	except Exception as e: 
 		print(e)
@@ -224,6 +235,10 @@ def Imagen():
 		return {"R":-2}
 	
 	
+	if not R:
+		db.close()
+		return {"R":-3}
+
 	id_Usuario = R[0][0];
 	with open(f'tmp/{id_Usuario}',"wb") as imagen:
 		imagen.write(base64.b64decode(request.json['data'].encode()))
@@ -233,11 +248,22 @@ def Imagen():
 	# Guardar info del archivo en la base de datos
 	try:
 		with db.cursor() as cursor:
-			cursor.execute(f'insert into Imagen values(null,"{request.json["name"]}","img/",{id_Usuario})');
-			cursor.execute('select max(id) as idImagen from Imagen where id_Usuario = '+str(id_Usuario));
+			#PARCHE A03
+			sql_insert = 'INSERT INTO Imagen (id, name, ruta, id_Usuario) VALUES (NULL, %s, "img/", %s)'
+			cursor.execute(sql_insert, (request.json["name"], id_Usuario))
+			
+			#PARCHE A03
+			sql_select = 'SELECT MAX(id) AS idImagen FROM Imagen WHERE id_Usuario = %s'
+			cursor.execute(sql_select, (id_Usuario,))
+			
 			R = cursor.fetchall()
 			idImagen = R[0][0];
-			cursor.execute('update Imagen set ruta = "img/'+str(idImagen)+'.'+str(request.json['ext'])+'" where id = '+str(idImagen));
+			
+			
+			ruta = 'img/'+str(idImagen)+'.'+str(request.json['ext'])
+			sql_update = 'UPDATE Imagen SET ruta = %s WHERE id = %s'
+			cursor.execute(sql_update, (ruta, idImagen));
+			
 			db.commit()
 			# Mover archivo a su nueva locacion
 			shutil.move('tmp/'+str(id_Usuario),'img/'+str(idImagen)+'.'+str(request.json['ext']))
@@ -285,7 +311,8 @@ def Descargar():
 	R = False
 	try:
 		with db.cursor() as cursor:
-			cursor.execute('select id_Usuario from AccesoToken where token = "'+TKN+'"');
+			#PARCHE A03
+			cursor.execute('SELECT id_Usuario FROM AccesoToken WHERE token = %s', (TKN,));
 			R = cursor.fetchall()
 	except Exception as e: 
 		print(e)
@@ -293,17 +320,26 @@ def Descargar():
 		return {"R":-2}
 		
 	
+	if not R:
+		db.close()
+		return {"R":-4}
 	
 	# Buscar imagen y enviarla
 	
 	try:
 		with db.cursor() as cursor:
-			cursor.execute('Select name,ruta from  Imagen where id = '+str(idImagen));
+			#PARCHE A03
+			cursor.execute('SELECT name, ruta FROM Imagen WHERE id = %s', (idImagen,));
 			R = cursor.fetchall()
 	except Exception as e: 
 		print(e)
 		db.close()
 		return {"R":-3}
+		
+	if not R:
+		db.close()
+		return {"R":-5}
+		
 	print(Path("img").resolve(),R[0][1])
 	return static_file(R[0][1],Path(".").resolve())
 
