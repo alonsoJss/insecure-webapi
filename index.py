@@ -7,9 +7,11 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from bottle import route, run, template, post, request, static_file, default_app
+import bcrypt # <--- Mantenido: Para hashing seguro de contraseñas
 
 import ssl
 from wsgiref.simple_server import make_server, WSGIServer
+
 
 def loadDatabaseSettings(pathjs):
 	pathjs = Path(pathjs)
@@ -45,13 +47,11 @@ def getToken():
 # Registro
 /*
  * Este Registro recibe un JSON con el siguiente formato
- * 
- * : 
- *		"uname": "XXX",
- *		"email": "XXX",
- * 		"password": "XXX"
- * 
- * */
+ * * : 
+ * "uname": "XXX",
+ * "email": "XXX",
+ * "password": "XXX"
+ * * */
 """
 @post('/Registro')
 def Registro():
@@ -69,12 +69,17 @@ def Registro():
 	# TODO checar si estan vacio los elementos del json
 	if not R:
 		return {"R":-1}
+	
+	#PACHE A02
+	pwsdcod = request.json["password"].encode('utf-8')
+	hshpwsd = bcrypt.hashpw(pwsdcod, bcrypt.gensalt()).decode('utf-8')
+
 	# TODO validar correo en json
 	# TODO Control de error de la DB
 	R = False
 	try:
 		with db.cursor() as cursor:
-			cursor.execute(f'insert into Usuario values(null,"{request.json["uname"]}","{request.json["email"]}",md5("{request.json["password"]}"))');
+			cursor.execute(f'insert into Usuario values(null,"{request.json["uname"]}","{request.json["email"]}", "{hshpwsd}")');
 			R = cursor.lastrowid
 			db.commit()
 		db.close()
@@ -89,13 +94,10 @@ def Registro():
 """
 /*
  * Este Registro recibe un JSON con el siguiente formato
- * 
- * : 
- *		"uname": "XXX",
- * 		"password": "XXX"
- * 
- * 
- * Debe retornar un Token 
+ * * : 
+ * "uname": "XXX",
+ * "password": "XXX"
+ * * * Debe retornar un Token 
  * */
 """
 
@@ -117,35 +119,52 @@ def Login():
 	if not R:
 		return {"R":-1}
 	
-	# TODO validar correo en json
-	# TODO Control de error de la DB
-	R = False
+	#PARCHE A02
+	uname = request.json["uname"]
+	password = request.json["password"]
+
+	usuario = False
 	try:
 		with db.cursor() as cursor:
-			print(f'Select id from  Usuario where uname ="{request.json["uname"]}" and password = md5("{request.json["password"]}")')
-			cursor.execute(f'Select id from  Usuario where uname ="{request.json["uname"]}" and password = md5("{request.json["password"]}")');
-			R = cursor.fetchall()
+			cursor.execute(f'Select id, password from Usuario where uname ="{uname}"');
+			usuario = cursor.fetchall()
 	except Exception as e: 
 		print(e)
 		db.close()
 		return {"R":-2}
 	
 	
-	if not R:
+	if not usuario:
 		db.close()
-		return {"R":-3}
+		return {"R":-3} 
+
+	usuarioId = usuario[0][0]
+	hsh_local = usuario[0][1].encode('utf-8')
+	pswdcod = password.encode('utf-8')
+
 	
+	try:
+		if not bcrypt.checkpw(pswdcod, hsh_local):
+			db.close()
+			return {"R":-3} 
+	except ValueError:
+		db.close()
+		return {"R":-3} 
+	
+	R_id = usuarioId
+	
+
 	T = getToken();
 	#file_put_contents('/tmp/log','insert into AccesoToken values('.R[0].',"'.T.'",now())');
 	with open("/tmp/log","a") as log:
-		log.write(f'Delete from AccesoToken where id_Usuario = "{R[0][0]}"\n')
-		log.write(f'insert into AccesoToken values({R[0][0]},"{T}",now())\n')
+		log.write(f'Delete from AccesoToken where id_Usuario = "{R_id}"\n')
+		log.write(f'insert into AccesoToken values({R_id},"{T}",now())\n')
 	
 	
 	try:
 		with db.cursor() as cursor:
-			cursor.execute(f'Delete from AccesoToken where id_Usuario = "{R[0][0]}"');
-			cursor.execute(f'insert into AccesoToken values({R[0][0]},"{T}",now())');
+			cursor.execute(f'Delete from AccesoToken where id_Usuario = "{R_id}"');
+			cursor.execute(f'insert into AccesoToken values({R_id},"{T}",now())');
 			db.commit()
 			db.close()
 			return {"R":0,"D":T}
@@ -157,15 +176,11 @@ def Login():
 """
 /*
  * Este subir imagen recibe un JSON con el siguiente formato
- * 
- * 
- * 		"token: "XXX"
+ * * * "token: "XXX"
  *		"name": "XXX",
- * 		"data": "XXX",
- * 		"ext": "PNG"
- * 
- * 
- * Debe retornar codigo de estado
+ * "data": "XXX",
+ * "ext": "PNG"
+ * * * Debe retornar codigo de estado
  * */
 """
 @post('/Imagen')
@@ -235,13 +250,10 @@ def Imagen():
 """
 /*
  * Este Registro recibe un JSON con el siguiente formato
- * 
- * : 
- * 		"token: "XXX",
- * 		"id": "XXX"
- * 
- * 
- * Debe retornar un Token 
+ * * : 
+ * "token: "XXX",
+ * "id": "XXX"
+ * * * Debe retornar un Token 
  * */
 """
 
@@ -302,21 +314,21 @@ class SSLWSGIServer(WSGIServer):
 	Levanta HTTPS directamente con el certificado de mkcert.
 	"""
 	def server_bind(self):
-        	super().server_bind()
-        	# Certificado generado por mkcert para el dominio interno equipo.oro 
-        	cert_path = '/home/topicos/certs/equipo.oro.pem'
-        	key_path = '/home/topicos/certs/equipo.oro-key.pem'
-        	self.socket = ssl.wrap_socket(
-    			self.socket,
-       			keyfile=key_path,
-       			certfile=cert_path,
-       			server_side=True
-       		)
+		super().server_bind()
+		# Certificado generado por mkcert para el dominio interno equipo.oro 
+		cert_path = '/home/topicos/certs/equipo.oro.pem'
+		key_path = '/home/topicos/certs/equipo.oro-key.pem'
+		self.socket = ssl.wrap_socket(
+			self.socket,
+			keyfile=key_path,
+			certfile=cert_path,
+			server_side=True
+		)
 
 if __name__ == '__main__':
-    # run(host='0.0.0.0', port=8080, debug=True)
-    app = default_app()
-    # Escuchamos en 0.0.0.0:8080 pero ahora con HTTPS
-    httpd = make_server('0.0.0.0', 8080, app, server_class=SSLWSGIServer)
-    print("Servidor HTTPS corriendo en https://equipo.oro:8080")
-    httpd.serve_forever()
+	# run(host='0.0.0.0', port=8080, debug=True)
+	app = default_app()
+	# Escuchamos en 0.0.0.0:8080 pero ahora con HTTPS
+	httpd = make_server('0.0.0.0', 8080, app, server_class=SSLWSGIServer)
+	print("Servidor HTTPS corriendo en https://equipo.oro:8080")
+	httpd.serve_forever()

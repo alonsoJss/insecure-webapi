@@ -1,0 +1,18 @@
+A02:2021 – Cryptographic Failures
+Esta vulnerabilidad ocurre cuando los datos sensibles como contraseñas, tokens, etcetera, no se protegen adecuadamente. 
+Dentro del código, esta vulnerabilidad la podemos observar en la funcion de Registro ya que únicamente protege
+la contraseña con un MD5. Esto queda obsoleto y vulnerable a la Api
+Para la solución ocupamos la libreria bcrypt ya que nos otorga la posibilidad de agregar un salt a dicha
+contraseña y pueda ser mas segura e impenetrable
+
+(Linea 73)
+	pwsdcod = request.json["password"].encode('utf-8')
+	hshpwsd = bcrypt.hashpw(pwsdcod, bcrypt.gensalt()).decode('utf-8')
+
+Aqui es en la funcion Login para que compare la contraseña que recibe con el hash local
+(Linea 141)
+	usuarioId = usuario[0][0]
+	hsh_local = usuario[0][1].encode('utf-8')
+	pswdcod = password.encode('utf-8')
+
+
