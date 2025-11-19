@@ -6,9 +6,10 @@ import base64
 import shutil
 from datetime import datetime
 from pathlib import Path
-from bottle import route, run, template, post, request, static_file
+from bottle import route, run, template, post, request, static_file, default_app
 
-
+import ssl
+from wsgiref.simple_server import make_server, WSGIServer
 
 def loadDatabaseSettings(pathjs):
 	pathjs = Path(pathjs)
@@ -294,5 +295,28 @@ def Descargar():
 	print(Path("img").resolve(),R[0][1])
 	return static_file(R[0][1],Path(".").resolve())
 
+
+class SSLWSGIServer(WSGIServer):
+	"""
+	Servidor WSGI con soporte SSL.
+	Levanta HTTPS directamente con el certificado de mkcert.
+	"""
+	def server_bind(self):
+        	super().server_bind()
+        	# Certificado generado por mkcert para el dominio interno equipo.oro 
+        	cert_path = '/home/topicos/certs/equipo.oro.pem'
+        	key_path = '/home/topicos/certs/equipo.oro-key.pem'
+        	self.socket = ssl.wrap_socket(
+    			self.socket,
+       			keyfile=key_path,
+       			certfile=cert_path,
+       			server_side=True
+       		)
+
 if __name__ == '__main__':
-    run(host='localhost', port=8080, debug=True)
+    # run(host='0.0.0.0', port=8080, debug=True)
+    app = default_app()
+    # Escuchamos en 0.0.0.0:8080 pero ahora con HTTPS
+    httpd = make_server('0.0.0.0', 8080, app, server_class=SSLWSGIServer)
+    print("Servidor HTTPS corriendo en https://equipo.oro:8080")
+    httpd.serve_forever()
